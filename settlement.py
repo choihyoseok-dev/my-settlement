@@ -6,13 +6,12 @@ import os
 from datetime import datetime
 
 # --------------------------------------------------------------------------
-# 1. 설정 및 디자인 (CSS)
+# 1. 설정 및 스타일 (CSS)
 # --------------------------------------------------------------------------
 st.set_page_config(page_title="COMO CASA 정산 시스템", layout="wide", page_icon="🏢")
 
 st.markdown("""
     <style>
-    /* 폰트 및 기본 스타일 */
     body { font-family: 'Malgun Gothic', sans-serif; }
     
     /* 타이틀 스타일 */
@@ -20,38 +19,24 @@ st.markdown("""
         font-size: 32px; font-weight: 800; color: #1E3A8A;
         border-bottom: 3px solid #1E3A8A; padding-bottom: 10px; margin-bottom: 20px;
     }
-    
-    /* 입력창 스타일 */
-    div.stTextInput > div > div > input {
-        text-align: right; /* 숫자 입력처럼 우측 정렬 */
+    .sub-title {
+        font-size: 20px; font-weight: 700; color: #1E3A8A;
+        margin-top: 20px; margin-bottom: 10px; border-bottom: 1px solid #ddd;
     }
     
-    /* 정산서 리포트 (HTML) 스타일 */
+    /* 입력창 텍스트 우측 정렬 (숫자처럼 보이게) */
+    div[data-testid="stTextInput"] input {
+        text-align: right;
+    }
+    
+    /* 리포트 스타일 */
     .report-wrapper {
-        background-color: white;
-        padding: 40px;
-        border: 1px solid #ccc;
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
-        font-family: 'Malgun Gothic', sans-serif;
-        color: #000;
+        background-color: white; padding: 40px; border: 1px solid #ccc;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.1); color: #000;
     }
-    .report-title {
-        text-align: center; font-size: 26px; font-weight: bold;
-        border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 30px;
-    }
-    .section-header {
-        font-size: 16px; font-weight: bold; margin-top: 30px; margin-bottom: 10px;
-        color: #1E3A8A;
-    }
-    .styled-table {
-        width: 100%; border-collapse: collapse; font-size: 13px;
-    }
-    .styled-table th {
-        border: 1px solid #000; background-color: #f2f2f2; padding: 8px; text-align: center;
-    }
-    .styled-table td {
-        border: 1px solid #000; padding: 8px;
-    }
+    .styled-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .styled-table th { border: 1px solid #000; background-color: #f2f2f2; padding: 8px; text-align: center; }
+    .styled-table td { border: 1px solid #000; padding: 8px; }
     .text-right { text-align: right; }
     .text-center { text-align: center; }
     .bold { font-weight: bold; }
@@ -60,7 +45,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --------------------------------------------------------------------------
-# 2. 데이터 구조 및 유틸리티 함수
+# 2. 데이터 유틸리티 (콤마 변환기)
 # --------------------------------------------------------------------------
 OTA_LIST = ["아고다", "부킹닷컴", "에어비앤비", "트립닷컴", "야놀자게하", "야놀자펜션", "여기어때", "추가정보(자가운영등)"]
 
@@ -75,30 +60,32 @@ EXPENSE_ITEMS = {
     "room_supply": "객실소모품", "etc_supply": "기타소모품"
 }
 
-def parse_comma_int(value_str):
-    """콤마가 포함된 문자열을 정수로 변환"""
-    if value_str is None: return 0
-    if isinstance(value_str, (int, float)): return int(value_str)
+def str_to_int(val):
+    """콤마가 있는 문자열을 정수로 변환 (계산용)"""
+    if val is None or val == "":
+        return 0
+    if isinstance(val, (int, float)):
+        return int(val)
+    # 문자열에서 콤마 제거
+    clean_str = str(val).replace(',', '').strip()
     try:
-        return int(str(value_str).replace(',', '').strip())
-    except:
+        return int(clean_str)
+    except ValueError:
         return 0
 
-def format_comma(value):
-    """숫자를 콤마가 포함된 문자열로 변환"""
-    if value is None: return ""
+def int_to_str(val):
+    """정수를 콤마가 있는 문자열로 변환 (표시용)"""
     try:
-        return f"{int(value):,}"
+        if val is None: return "0"
+        return f"{int(val):,}"
     except:
-        return str(value)
-
-def get_safe_value(value):
-    return parse_comma_int(value)
+        return "0"
 
 # --------------------------------------------------------------------------
-# 3. 로직 및 상태 초기화
+# 3. 상태 초기화
 # --------------------------------------------------------------------------
 def init_session_state():
+    # OTA 데이터 (내부적으로는 숫자형태로 저장)
     if 'ota_df' not in st.session_state:
         data = {c: [0]*len(OTA_LIST) if c != "OTA" else OTA_LIST for c in COLS.values()}
         st.session_state.ota_df = pd.DataFrame(data)
@@ -123,9 +110,13 @@ def init_session_state():
     if 'current_page' not in st.session_state:
         st.session_state.current_page = 'input'
 
+# --------------------------------------------------------------------------
+# 4. 계산 로직
+# --------------------------------------------------------------------------
 def calculate_metrics(df, expenses):
-    # 1. OTA 계산
+    # 계산은 숫자형 데이터프레임으로 수행
     calc_df = df.copy()
+    # H열 재계산 (안전장치)
     calc_df[COLS["H"]] = calc_df[COLS["F"]] - calc_df[COLS["G"]]
     sums = calc_df.sum(numeric_only=True)
     
@@ -135,36 +126,30 @@ def calculate_metrics(df, expenses):
     metrics['E_total'] = sums.get(COLS["E"], 0)
     metrics['D_total'] = sums.get(COLS["D"], 0)
     
-    # 2. 비용 계산
-    metrics['total_expense'] = sum(get_safe_value(expenses[k]) for k in EXPENSE_ITEMS.keys())
+    metrics['total_expense'] = sum(expenses[k] for k in EXPENSE_ITEMS.keys())
     
-    # 3. 이익 계산
     metrics['net_profit'] = metrics['G_total'] - metrics['total_expense']
     metrics['commission'] = int(metrics['net_profit'] * 0.20)
     metrics['distributable'] = int(metrics['net_profit'] - metrics['commission'])
     
-    # 4. KPI
-    op_days = get_safe_value(expenses.get('operating_days', 30))
+    op_days = expenses.get('operating_days', 30)
     metrics['days_in_month'] = op_days
-    metrics['avail_nights'] = op_days * get_safe_value(expenses.get('avail_rooms', 1))
+    metrics['avail_nights'] = op_days * expenses.get('avail_rooms', 1)
     
     metrics['adr'] = (metrics['F_total'] / metrics['E_total']) if metrics['E_total'] > 0 else 0
     metrics['occ'] = (metrics['E_total'] / metrics['avail_nights'] * 100) if metrics['avail_nights'] > 0 else 0
     metrics['alos'] = (metrics['E_total'] / metrics['D_total']) if metrics['D_total'] > 0 else 0
     
-    # 5. 소유주 정산
-    metrics['room_op_days'] = get_safe_value(expenses.get('room_op_days', 0))
-    divisor = get_safe_value(expenses.get('divisor_days', 1))
+    metrics['room_op_days'] = expenses.get('room_op_days', 0)
+    divisor = expenses.get('divisor_days', 1)
     metrics['daily_base'] = metrics['distributable'] / divisor if divisor > 0 else 0
-    metrics['share_rate'] = get_safe_value(expenses.get('share_rate', 100))
-    
-    # 최종 배당 (지분율 반영 or 단독) -> 여기서는 단순 배당대상액 표시
+    metrics['share_rate'] = expenses.get('share_rate', 100)
     metrics['final_payout'] = metrics['distributable'] 
     
     return metrics
 
 # --------------------------------------------------------------------------
-# 4. PDF 생성 (인코딩 해결)
+# 5. PDF 생성 (인코딩 해결)
 # --------------------------------------------------------------------------
 class PDFReport(FPDF):
     def footer(self):
@@ -188,22 +173,19 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
         pdf.add_font("NanumGothic", "", font_path, uni=True)
         pdf.add_font("NanumGothic", "B", font_path, uni=True)
     else:
-        return None # 폰트 없음
+        return None 
 
-    # 타이틀
     pdf.set_font("NanumGothic", "B", 22)
     pdf.cell(0, 15, f"꼬모까사 숙박 운영 정산서 : {meta['year']%100}년 {meta['month']}월", ln=True, align='C')
     pdf.set_line_width(0.5)
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
     
-    # 정보
     pdf.set_font("NanumGothic", "", 10)
     pdf.cell(0, 5, f"발행일: {meta['issue_date']}", ln=True)
     pdf.cell(0, 5, f"호실명/소유주: [{meta['room_name']}] / [{meta['owner_name']}]", ln=True)
     pdf.ln(8)
     
-    # 테이블 그리기 함수
     def draw_row(c1, c2, c3, c4, fill=False, bold=False):
         pdf.set_font("NanumGothic", "B" if bold else "", 10)
         if fill: pdf.set_fill_color(240, 240, 240)
@@ -215,7 +197,6 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     def fmt(x): return f"{x:,.0f}" if isinstance(x, (int, float)) else x
     def pct(x): return f"{x:.1f}%"
 
-    # 1. Sales
     pdf.set_font("NanumGothic", "B", 12)
     pdf.cell(0, 10, "1. 판매 현황 (Sales Status)", ln=True)
     draw_row("구분", "금액/수치", "단위", "비고", True, True)
@@ -229,7 +210,6 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     draw_row("OCC (가동률)", f"{metrics['occ']:.1f}", "%", "")
     pdf.ln(5)
 
-    # 2. Detail
     pdf.set_font("NanumGothic", "B", 12)
     pdf.cell(0, 10, "2. 정산 세부 내역", ln=True)
     pdf.set_fill_color(240, 240, 240)
@@ -252,7 +232,7 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     detail_row("총 비용", fmt(metrics['total_expense']), pct(metrics['total_expense']/base*100), "", True)
     
     for k, label in EXPENSE_ITEMS.items():
-        val = get_safe_value(expenses[k])
+        val = expenses[k]
         note = notes.get(k, "")
         if val > 0 or note:
             detail_row(f"  - {label}", fmt(val), pct(val/base*100), note)
@@ -262,7 +242,6 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     detail_row("배당 대상 순이익", fmt(metrics['distributable']), pct(metrics['distributable']/base*100), "", True)
     pdf.ln(5)
 
-    # 3. Owner
     pdf.set_font("NanumGothic", "B", 12)
     pdf.cell(0, 10, "3. 소유주 정산", ln=True)
     draw_row("구분", "내용", "단위", "", True, True)
@@ -271,7 +250,6 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     draw_row("배당 기준 일액", fmt(int(metrics['daily_base'])), "원", "")
     draw_row("지분율", f"{metrics['share_rate']}%", "%", "")
     
-    # 도장
     if stamp_file:
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
@@ -283,7 +261,7 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     return bytes(pdf.output())
 
 # --------------------------------------------------------------------------
-# 5. 메인 UI
+# 6. 메인 UI 및 로직
 # --------------------------------------------------------------------------
 def main():
     init_session_state()
@@ -296,88 +274,119 @@ def main():
 def render_input_page():
     st.markdown('<div class="main-title">COMO CASA 정산 시스템 (Admin)</div>', unsafe_allow_html=True)
     
-    # 메타 정보
     with st.expander("📝 기본 정보 (발행일, 소유주)", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
         st.session_state.meta_info['year'] = c1.number_input("년도", value=st.session_state.meta_info['year'])
         st.session_state.meta_info['month'] = c2.number_input("월", value=st.session_state.meta_info['month'])
         st.session_state.meta_info['room_name'] = c3.text_input("호실명", value=st.session_state.meta_info['room_name'])
         st.session_state.meta_info['owner_name'] = c4.text_input("소유주", value=st.session_state.meta_info['owner_name'])
-        
         c5, c6 = st.columns(2)
         st.session_state.meta_info['issue_date'] = c5.text_input("발행일", value=st.session_state.meta_info['issue_date'])
         st.session_state['stamp_file'] = c6.file_uploader("직인 이미지", type=['png'])
 
-    st.markdown("### 1. OTA 매출 입력")
-    # 합계 미리보기
-    curr = st.session_state.ota_df.copy()
-    curr[COLS["H"]] = curr[COLS["F"]] - curr[COLS["G"]]
-    sums = curr.sum(numeric_only=True)
+    st.markdown('<div class="sub-title">1. OTA 매출 입력</div>', unsafe_allow_html=True)
+    
+    # [핵심] OTA 테이블: 계산 및 콤마 포맷팅 처리
+    # 1. 내부 저장소(ota_df)는 숫자형(int/float) 유지
+    # 2. 에디터에 보여줄 때(display_df)는 문자열(String)로 변환하여 콤마 추가
+    
+    numeric_df = st.session_state.ota_df.copy()
+    
+    # H열 자동 계산 (숫자 상태에서 계산)
+    numeric_df[COLS["H"]] = numeric_df[COLS["F"]] - numeric_df[COLS["G"]]
+    
+    # 에디터용 데이터프레임 (모두 문자열로 변환하여 콤마 적용)
+    display_df = numeric_df.copy()
+    for col in [COLS["D"], COLS["E"], COLS["F"], COLS["G"], COLS["H"]]:
+        display_df[col] = display_df[col].apply(lambda x: int_to_str(x))
+
+    # 합계 보여주기
+    sums = numeric_df.sum(numeric_only=True)
     st.info(f"💰 매출 합계: {sums[COLS['F']]:,.0f}원  |  입금 합계: {sums[COLS['G']]:,.0f}원")
     
-    edited = st.data_editor(
-        curr, 
-        use_container_width=True, 
+    # 데이터 에디터 (TextColumn으로 설정하여 콤마 문자열 표시)
+    edited_df_str = st.data_editor(
+        display_df,
+        use_container_width=True,
         hide_index=True,
         num_rows="fixed",
         column_config={
             COLS["OTA"]: st.column_config.TextColumn("플랫폼", disabled=True),
-            COLS["D"]: st.column_config.NumberColumn("체크인", format="%.0f"),
-            COLS["E"]: st.column_config.NumberColumn("숙박일수", format="%.0f"),
-            COLS["F"]: st.column_config.NumberColumn("총매출", format="%.0f"),
-            COLS["G"]: st.column_config.NumberColumn("입금액", format="%.0f"),
-            COLS["H"]: st.column_config.NumberColumn("수수료(자동)", format="%.0f", disabled=True),
+            COLS["D"]: st.column_config.TextColumn("체크인", width="small"),
+            COLS["E"]: st.column_config.TextColumn("숙박일수", width="small"),
+            COLS["F"]: st.column_config.TextColumn("총매출", width="medium"),
+            COLS["G"]: st.column_config.TextColumn("입금액", width="medium"),
+            COLS["H"]: st.column_config.TextColumn("수수료(자동)", width="medium", disabled=True),
         }
     )
     
-    st.divider()
-    st.markdown("### 2. 비용 및 운영 정보 (콤마 자동 적용)")
+    # [중요] 에디터 변경 감지 및 데이터 업데이트
+    # 에디터의 문자열 데이터("10,000")를 다시 숫자(10000)로 변환하여 저장
+    # 만약 데이터가 변경되었다면, 즉시 저장하고 rerun하여 H열 계산을 수행
     
-    # [핵심 수정] 비용 입력란: text_input 사용 + 콤마 포맷팅
+    is_changed = False
+    new_data = {}
+    for col in numeric_df.columns:
+        if col == COLS["OTA"]:
+            new_data[col] = edited_df_str[col]
+        else:
+            # 문자열 -> 숫자 변환
+            new_data[col] = edited_df_str[col].apply(lambda x: str_to_int(x))
+    
+    new_df_numeric = pd.DataFrame(new_data)
+    
+    # 변경 사항이 있으면 세션 업데이트 및 리런
+    # (F나 G가 바뀌면 H가 재계산되어야 하므로 리런 필수)
+    if not new_df_numeric.equals(st.session_state.ota_df):
+        st.session_state.ota_df = new_df_numeric
+        st.rerun()
+
+    
+    st.markdown('<div class="sub-title">2. 비용 및 운영 정보</div>', unsafe_allow_html=True)
+    
+    # [핵심] 비용 입력: text_input + 콤마 포맷터 사용
     for key, label in EXPENSE_ITEMS.items():
         c1, c2 = st.columns([1, 2])
         
-        # 1. 현재 저장된 정수값을 "10,000" 문자열로 변환하여 표시
-        current_val = st.session_state.expenses[key]
-        display_val = format_comma(current_val) if current_val != 0 else ""
+        # 현재 값 가져오기 (숫자)
+        curr_val = st.session_state.expenses[key]
+        # 화면에 보일 값 (문자열 "10,000")
+        disp_val = int_to_str(curr_val) if curr_val != 0 else ""
         
-        # 2. 텍스트 입력 (입력 시에는 문자열)
+        # 텍스트 입력창
         new_val_str = c1.text_input(
             f"{label} (금액)", 
-            value=display_val, 
+            value=disp_val, 
             key=f"in_{key}",
             placeholder="0"
         )
         
-        # 3. 입력된 문자열에서 콤마 제거 후 정수로 변환하여 저장
-        st.session_state.expenses[key] = parse_comma_int(new_val_str)
+        # 입력된 문자열을 숫자로 변환하여 저장
+        st.session_state.expenses[key] = str_to_int(new_val_str)
         
-        # 4. 비고란
+        # 비고
         note = c2.text_input(f"{label} 비고", value=st.session_state.expense_notes.get(key, ""), key=f"nt_{key}")
         st.session_state.expense_notes[key] = note
     
-    st.markdown("#### ⚙️ 추가 운영 지표")
-    col_a, col_b, col_c = st.columns(3)
-    # 여기도 콤마 적용 가능하지만, 일수/비율 등은 그냥 숫자가 편할 수 있어 number_input 유지하되 텍스트로 변경 가능
-    # 요청사항은 "입력 박스" 전반이므로 여기도 적용하는 것이 좋음.
+    st.markdown("#### ⚙️ 추가 운영 지표 (콤마 자동 적용)")
     
-    def input_comma(label, key):
+    def input_comma_field(label, key, col):
         val = st.session_state.expenses.get(key, 0)
-        disp = format_comma(val) if val != 0 else ""
-        new_s = st.text_input(label, value=disp, key=f"k_{key}")
-        st.session_state.expenses[key] = parse_comma_int(new_s)
+        disp = int_to_str(val) if val != 0 else ""
+        new_s = col.text_input(label, value=disp, key=f"k_{key}")
+        st.session_state.expenses[key] = str_to_int(new_s)
 
-    with col_a: input_comma("정산월 일수", 'operating_days')
-    with col_b: input_comma("운영 객실 수", 'avail_rooms')
-    with col_c: input_comma("해당 호실 가동일", 'room_op_days')
+    col_a, col_b, col_c = st.columns(3)
+    input_comma_field("정산월 일수", 'operating_days', col_a)
+    input_comma_field("운영 객실 수", 'avail_rooms', col_b)
+    input_comma_field("해당 호실 가동일", 'room_op_days', col_c)
     
     col_d, col_e = st.columns(2)
-    with col_d: input_comma("배당 분모 (전체 가동일)", 'divisor_days')
-    with col_e: input_comma("지분율 (%)", 'share_rate')
+    input_comma_field("배당 분모 (전체 가동일)", 'divisor_days', col_d)
+    input_comma_field("지분율 (숫자만)", 'share_rate', col_e)
 
     st.divider()
     if st.button("📊 정산서 생성", type="primary", use_container_width=True):
-        st.session_state.ota_df = edited
         st.session_state.current_page = 'report'
         st.rerun()
 
@@ -389,21 +398,16 @@ def render_report_page():
     metrics = calculate_metrics(st.session_state.ota_df, st.session_state.expenses)
     meta = st.session_state.meta_info
     
-    # -------------------------------------------------------------
-    # [핵심 수정] HTML 리포트 생성 (하나의 문자열로 완벽하게 조립)
-    # -------------------------------------------------------------
     def fmt(x): return f"{x:,.0f}" if isinstance(x, (int, float)) else x
     def pct(x): return f"{x:.1f}%"
     base = metrics['G_total'] if metrics['G_total'] > 0 else 1
 
-    # HTML 조립 시작 (f-string 하나로 묶거나, 리스트 join 사용)
-    # 여기서는 가독성을 위해 리스트에 담고 join 합니다.
+    # HTML 리포트 생성
     html_parts = []
     
-    # 1. 헤더
     html_parts.append(f"""
     <div class="report-wrapper">
-        <div class="report-title">
+        <div style="text-align: center; font-size: 28px; font-weight: bold; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px;">
             꼬모까사 숙박 운영 정산서 : {meta['year']%100}년 {meta['month']}월
         </div>
         <div style="font-size: 14px; margin-bottom: 20px;">
@@ -412,7 +416,6 @@ def render_report_page():
         </div>
     """)
     
-    # 2. 판매 현황 테이블
     html_parts.append(f"""
         <div class="section-header">1. 판매 현황 (Sales Status)</div>
         <table class="styled-table">
@@ -434,7 +437,6 @@ def render_report_page():
         </table>
     """)
     
-    # 3. 상세 내역 테이블
     html_parts.append(f"""
         <div class="section-header">2. 정산 세부 내역 (Detail)</div>
         <table class="styled-table">
@@ -448,16 +450,14 @@ def render_report_page():
                 <tr><td class="bold">총 비용</td> <td class="text-right bold">{fmt(metrics['total_expense'])}</td> <td class="text-right">{pct(metrics['total_expense']/base*100)}</td> <td></td></tr>
     """)
     
-    # 비용 항목 루프
     for key, label in EXPENSE_ITEMS.items():
-        val = get_safe_value(st.session_state.expenses[key])
+        val = st.session_state.expenses[key]
         note = st.session_state.expense_notes.get(key, "")
         if val > 0 or note:
             html_parts.append(f"""
                 <tr><td>{label}</td> <td class="text-right">{fmt(val)}</td> <td class="text-right">{pct(val/base*100)}</td> <td>{note}</td></tr>
             """)
             
-    # 이익 및 수수료
     html_parts.append(f"""
                 <tr><td class="bold bg-gray">순이익 (차감전)</td> <td class="text-right bold bg-gray">{fmt(metrics['net_profit'])}</td> <td class="text-right bg-gray">{pct(metrics['net_profit']/base*100)}</td> <td class="bg-gray"></td></tr>
                 <tr><td class="bold">위탁 수수료</td> <td class="text-right bold">{fmt(metrics['commission'])}</td> <td class="text-right">{pct(metrics['commission']/base*100)}</td> <td>20%</td></tr>
@@ -466,7 +466,6 @@ def render_report_page():
         </table>
     """)
     
-    # 4. 소유주 정산
     html_parts.append(f"""
         <div class="section-header">3. 소유주 정산 (Owner Distribution)</div>
         <table class="styled-table">
@@ -492,11 +491,8 @@ def render_report_page():
     </div>
     """)
     
-    # 최종 렌더링 (단 한 번의 호출)
-    full_html = "\n".join(html_parts)
-    st.markdown(full_html, unsafe_allow_html=True)
+    st.markdown("\n".join(html_parts), unsafe_allow_html=True)
     
-    # PDF 다운로드
     st.divider()
     stamp_img = st.session_state.get('stamp_file')
     try:
