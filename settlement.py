@@ -11,25 +11,36 @@ st.set_page_config(page_title="COMO CASA 정산 시스템", layout="wide", page_
 
 st.markdown("""
     <style>
-    /* 1. 타이틀 스타일 */
+    /* 1. 메인 타이틀 (파란색, 볼드, 이모지 제거) */
     .main-title {
-        font-size: 40px;
+        font-family: 'Malgun Gothic', sans-serif;
+        font-size: 36px;
         font-weight: 800;
-        color: #1E3A8A; /* 짙은 블루 */
-        margin-bottom: 10px;
+        color: #1E3A8A; /* 짙은 네이비 블루 */
+        margin-bottom: 5px;
     }
-    .report-title {
-        font-size: 32px;
+    .sub-title {
+        font-family: 'Malgun Gothic', sans-serif;
+        font-size: 24px;
         font-weight: 700;
-        color: #333333;
-        text-align: center;
+        color: #1E3A8A;
         margin-top: 20px;
-        margin-bottom: 20px;
-        text-decoration: underline;
-        text-underline-offset: 8px;
+        margin-bottom: 10px;
+        border-bottom: 2px solid #1E3A8A;
+        padding-bottom: 5px;
     }
 
-    /* 2. 버튼 스타일 (블루 테마) */
+    /* 2. 합계 테이블 배경색 (회색) */
+    .total-table-container {
+        background-color: #F3F4F6;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid #D1D5DB;
+        margin-bottom: 15px;
+        font-weight: bold;
+    }
+
+    /* 3. 버튼 스타일 */
     div.stButton > button[kind="primary"] {
         background-color: #2563EB !important;
         border-color: #2563EB !important;
@@ -42,21 +53,28 @@ st.markdown("""
         color: #2563EB !important;
     }
 
-    /* 3. A4 용지 느낌의 리포트 컨테이너 */
-    .a4-container {
-        background-color: white;
-        padding: 40px;
-        margin: auto;
-        border: 1px solid #ddd;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        max-width: 210mm; /* A4 폭 */
-        min-height: 297mm; /* A4 높이 */
-    }
-
-    /* 4. 입력창 포커스 색상 */
+    /* 4. 입력창 포커스 및 테이블 */
     input:focus {
         border-color: #2563EB !important;
         box-shadow: 0 0 0 1px #2563EB !important;
+    }
+    
+    /* 5. A4 미리보기 컨테이너 */
+    .a4-preview {
+        border: 1px solid #ddd;
+        padding: 40px;
+        background-color: white;
+        margin-bottom: 20px;
+    }
+    
+    /* 6. 상세내역 테이블 (스크롤 제거용 스타일) */
+    table {
+        width: 100%;
+    }
+    th {
+        background-color: #F3F4F6 !important;
+        color: #333 !important;
+        font-weight: bold !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -115,7 +133,7 @@ def get_safe_value(value):
     return value if value is not None else 0
 
 def calculate_metrics(df, expenses):
-    # 계산용 복사본
+    # 계산용 복사본 (H = F - G 자동 계산)
     calc_df = df.copy()
     calc_df[COLS["H"]] = calc_df[COLS["F"]] - calc_df[COLS["G"]]
     
@@ -149,17 +167,30 @@ def create_pdf(metrics, expenses_dict, expense_notes):
     pdf = FPDF()
     pdf.add_page()
     
-    # 한글 폰트 설정
+    # [필수] 한글 폰트 설정 (없으면 경고 없이 깨질 수 있음)
     font_path = "NanumGothic.ttf"
     if os.path.exists(font_path):
         pdf.add_font("NanumGothic", "", font_path, uni=True)
         font_family = "NanumGothic"
     else:
-        font_family = "Arial"
+        font_family = "Arial" # 한글 깨짐
 
-    pdf.set_font(font_family, size=10)
+    # 타이틀
+    pdf.set_font(font_family, style='B', size=20)
+    pdf.set_text_color(30, 58, 138) # #1E3A8A (Blue)
+    pdf.cell(0, 15, "꼬모까사 위탁숙박 정산서", ln=True, align='C')
+    pdf.ln(10)
 
-    # 행 출력 헬퍼
+    pdf.set_text_color(0, 0, 0) # Black reset
+
+    # 헬퍼 함수
+    def write_section_title(title):
+        pdf.set_font(font_family, style='B', size=12)
+        pdf.set_text_color(30, 58, 138)
+        pdf.cell(0, 10, title, ln=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font(font_family, size=10)
+
     def write_row(c1, c2, c3, c4=""):
         pdf.cell(70, 8, c1, border=1)
         pdf.cell(35, 8, c2, border=1, align='R')
@@ -167,15 +198,8 @@ def create_pdf(metrics, expenses_dict, expense_notes):
         pdf.cell(60, 8, c4, border=1)
         pdf.ln()
 
-    # 타이틀
-    pdf.set_font(font_family, style='B', size=20)
-    pdf.cell(0, 15, "꼬모까사 위탁숙박 정산서", ln=True, align='C')
-    pdf.ln(10)
-
-    # 1. 요약
-    pdf.set_font(font_family, style='B', size=12)
-    pdf.cell(0, 10, "1. 판매 현황 (Summary)", ln=True)
-    pdf.set_font(font_family, size=10)
+    # 1. Summary
+    write_section_title("1. 판매 현황 (Summary)")
     
     pdf.cell(95, 8, f"판매총액: {metrics['F_total']:,} 원", border=1)
     pdf.cell(95, 8, f"순매출액: {metrics['G_total']:,} 원", border=1)
@@ -184,13 +208,11 @@ def create_pdf(metrics, expenses_dict, expense_notes):
     pdf.cell(95, 8, f"가동일수: {metrics['op_days']} 일", border=1)
     pdf.ln(10)
 
-    # 2. 상세 내역
-    pdf.set_font(font_family, style='B', size=12)
-    pdf.cell(0, 10, "2. 정산 세부 내역 (Detail)", ln=True)
+    # 2. Detail
+    write_section_title("2. 정산 세부 내역 (Detail)")
     
     # 헤더
-    pdf.set_fill_color(240, 240, 240)
-    pdf.set_font(font_family, size=10)
+    pdf.set_fill_color(243, 244, 246) # Gray background
     pdf.cell(70, 8, "구분", 1, 0, 'C', True)
     pdf.cell(35, 8, "금액", 1, 0, 'C', True)
     pdf.cell(25, 8, "비율", 1, 0, 'C', True)
@@ -212,13 +234,14 @@ def create_pdf(metrics, expenses_dict, expense_notes):
     write_row("위탁수수료 (20%)", f"{metrics['commission']:,}", f"{metrics['commission']/base*100:.1f}%", "순이익의 20%")
     
     pdf.set_font(font_family, style='B', size=11)
-    pdf.set_fill_color(230, 240, 255) # 연한 블루
+    pdf.set_fill_color(230, 240, 255) # Blue tint
     pdf.cell(70, 10, "최종 배당금", 1, 0, 'L', True)
     pdf.cell(35, 10, f"{metrics['final_payout']:,}", 1, 0, 'R', True)
     pdf.cell(25, 10, f"{metrics['final_payout']/base*100:.1f}%", 1, 0, 'R', True)
     pdf.cell(60, 10, "최종 지급액", 1, 1, 'L', True)
 
-    return pdf.output(dest='S').encode('latin-1')
+    # [중요] PDF 인코딩 오류 수정: bytearray를 직접 리턴
+    return bytes(pdf.output())
 
 # --------------------------------------------------------------------------
 # 4. 메인 화면
@@ -236,38 +259,45 @@ def render_input_page():
     st.markdown('<div class="main-title">COMO CASA 정산 시스템</div>', unsafe_allow_html=True)
 
     # ---------------------------------------------------------
-    # 1. OTA 매출 입력 (포커스 유지 & 네비게이션 해결)
+    # 1. OTA 매출 입력
     # ---------------------------------------------------------
-    st.subheader("1. 플랫폼(OTA)별 매출 입력")
-    st.caption("※ 팁: 엔터(Enter)나 방향키를 사용해 연속으로 입력하세요. 합계는 '저장' 시 갱신됩니다.")
+    st.markdown('<div class="sub-title">1. 플랫폼(OTA)별 매출 입력</div>', unsafe_allow_html=True)
+    st.caption("※ F(총매출액)와 G(입금액)를 입력하면 H(플랫폼수수료)가 자동 계산됩니다.")
 
-    # 편집용 데이터프레임
-    # session state와 바인딩하되, 키 입력시 자동 rerun을 막기 위해 
-    # form이나 별도 처리를 하지 않고 data_editor 자체 기능 활용
+    # [자동 계산 로직]
+    # 사용자가 입력한 데이터(st.session_state.ota_df)를 바탕으로
+    # H열을 계산한 뒤, 이 display_df를 에디터에 보여줍니다.
+    # 사용자가 F, G를 수정하면 다음 rerun 때 H가 업데이트되어 보입니다.
+    current_df = st.session_state.ota_df.copy()
+    current_df[COLS["H"]] = current_df[COLS["F"]] - current_df[COLS["G"]]
     
-    # 합계 미리보기 (현재 세션 상태 기준)
-    display_df = st.session_state.ota_df.copy()
-    display_df[COLS["H"]] = display_df[COLS["F"]] - display_df[COLS["G"]]
-    totals = display_df.sum(numeric_only=True)
+    # 합계 계산
+    totals = current_df.sum(numeric_only=True)
     
-    # 합계 테이블 생성 (문자열로 변환하여 콤마 적용)
-    total_row = {
+    # [합계 테이블 - 회색 배경 적용]
+    st.markdown('<div class="total-table-container">▼ 전체 합계 (자동 계산)</div>', unsafe_allow_html=True)
+    
+    total_data = pd.DataFrame([{
         COLS["OTA"]: "합 계",
-        COLS["D"]: f"{totals[COLS['D']]:,.0f}",
-        COLS["E"]: f"{totals[COLS['E']]:,.0f}",
-        COLS["F"]: f"{totals[COLS['F']]:,.0f}",
-        COLS["G"]: f"{totals[COLS['G']]:,.0f}",
-        COLS["H"]: f"{totals[COLS['H']]:,.0f}"
-    }
+        COLS["D"]: totals[COLS["D"]],
+        COLS["E"]: totals[COLS["E"]],
+        COLS["F"]: totals[COLS["F"]],
+        COLS["G"]: totals[COLS["G"]],
+        COLS["H"]: totals[COLS["H"]]
+    }])
     
-    st.markdown("**▼ 전체 합계 (입력 후 '저장'을 누르면 갱신됩니다)**")
-    st.dataframe(pd.DataFrame([total_row]), use_container_width=True, hide_index=True)
+    # Pandas Styler를 사용하여 배경색(회색) 적용
+    st.dataframe(
+        total_data.style.format("{:,.0f}", subset=[COLS["D"], COLS["E"], COLS["F"], COLS["G"], COLS["H"]])
+                         .set_properties(**{'background-color': '#F3F4F6', 'font-weight': 'bold'}),
+        use_container_width=True,
+        hide_index=True
+    )
 
-    # 데이터 에디터
-    # [중요] num_rows="fixed"로 하고, key를 부여하여 상태 유지
-    # [중요] on_change를 제거하여 엔터 시 리런 방지 -> 포커스 유지
+    # [데이터 에디터]
+    # 계산된 H값이 포함된 current_df를 보여주되, H열은 disabled 처리
     edited_df = st.data_editor(
-        st.session_state.ota_df,
+        current_df,
         key="ota_editor", 
         use_container_width=True,
         hide_index=True,
@@ -285,23 +315,21 @@ def render_input_page():
     st.divider()
 
     # ---------------------------------------------------------
-    # 2. 비용 입력 (세로 배치 & 콤마 표시)
+    # 2. 비용 입력
     # ---------------------------------------------------------
-    st.subheader("2. 월 운영 비용 및 정보")
+    st.markdown('<div class="sub-title">2. 월 운영 비용 및 정보</div>', unsafe_allow_html=True)
     
     # 1줄에 1개씩 세로 배치
     for key, label in EXPENSE_ITEMS.items():
-        # 레이아웃: [비용이름/입력창] --- [비고 입력창]
-        c1, c2 = st.columns([1, 2])
+        c1, c2 = st.columns([1, 3])
         
         with c1:
             val = st.number_input(
                 f"{label} (금액)",
                 value=st.session_state.expenses[key],
                 step=10000,
-                format="%d", # 입력 중에는 콤마 어려움, 표시는 정수로
-                key=f"input_{key}",
-                help="금액을 입력하세요"
+                format="%d",
+                key=f"input_{key}"
             )
         with c2:
             note = st.text_input(
@@ -312,28 +340,28 @@ def render_input_page():
                 label_visibility="visible"
             )
             
-        # 상태 임시 저장 (화면 리런 시 유지용)
         st.session_state.expenses[key] = val
         st.session_state.expense_notes[key] = note
         
     st.markdown("---")
     
-    # 가동일수 (너비 조정)
-    col_small, col_rest = st.columns([1, 4]) # 1:4 비율로 작게 만듦
+    col_small, _ = st.columns([1, 5])
     with col_small:
         op_days = st.number_input(
-            "이번 달 총 가동일수 (일)",
+            "총 가동일수",
             value=st.session_state.expenses['operating_days'],
             min_value=0, max_value=31,
             key="op_days_input"
         )
         st.session_state.expenses['operating_days'] = op_days
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # [저장 버튼]
-    if st.button("💾 입력 내용 저장 및 리포트 보기", type="primary", use_container_width=True):
-        # 에디터의 최신 상태를 세션에 반영
+    if st.button("💾 입력 내용 저장 및 정산서 보기", type="primary", use_container_width=True):
+        # H열을 제외한 사용자 입력값(D,E,F,G)만 세션에 업데이트
+        # (H는 어차피 계산되는 값이므로 저장할 때 무시하거나, 다음 렌더링 때 다시 계산됨)
+        # 여기서는 edited_df 전체를 저장합니다.
         st.session_state.ota_df = edited_df
         st.session_state.current_page = 'report'
         st.rerun()
@@ -344,89 +372,71 @@ def render_report_page():
         st.session_state.current_page = 'input'
         st.rerun()
     
-    # 계산 실행
     data = calculate_metrics(st.session_state.ota_df, st.session_state.expenses)
     
     # ------------------------------------------------------------------
-    # A4 용지 스타일 컨테이너 시작
+    # A4 미리보기 영역
     # ------------------------------------------------------------------
-    # Streamlit 컨테이너 사용하지만 CSS로 .a4-container 적용이 어려우므로
-    # 중앙 정렬된 컬럼을 사용하여 시각적 효과 구현
+    st.markdown('<div class="a4-preview">', unsafe_allow_html=True)
     
-    _, col_a4, _ = st.columns([1, 6, 1]) # 중앙 집중 레이아웃
+    st.markdown('<div class="main-title" style="text-align: center;">꼬모까사 위탁숙박 정산서</div>', unsafe_allow_html=True)
+    st.divider()
+
+    # 1. KPI
+    st.markdown('<div class="sub-title">1. 판매 현황 (Summary)</div>', unsafe_allow_html=True)
     
-    with col_a4:
-        st.markdown('<div class="report-title">꼬모까사 위탁숙박 정산서</div>', unsafe_allow_html=True)
-        
-        st.divider()
+    k1, k2 = st.columns(2)
+    k1.metric("판매총액", f"{data['F_total']:,} 원")
+    k2.metric("순매출액", f"{data['G_total']:,} 원")
+    
+    k3, k4 = st.columns(2)
+    k3.metric("객단가 (ADR)", f"{data['adr']:,.0f} 원")
+    k4.metric("가동일수", f"{data['op_days']} 일")
 
-        # 1. KPI (콤마 적용)
-        st.subheader("1. 판매 현황 (Summary)")
-        
-        k1, k2 = st.columns(2)
-        k1.metric("판매총액", f"{data['F_total']:,} 원")
-        k2.metric("순매출액", f"{data['G_total']:,} 원")
-        
-        k3, k4 = st.columns(2)
-        k3.metric("객단가 (ADR)", f"{data['adr']:,.0f} 원")
-        k4.metric("가동일수", f"{data['op_days']} 일")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-        st.markdown("---")
+    # 2. 상세 내역 (스크롤 없는 st.table 사용)
+    st.markdown('<div class="sub-title">2. 정산 세부 내역 (Detail)</div>', unsafe_allow_html=True)
+    
+    base = data['G_total'] if data['G_total'] > 0 else 1
+    rows = []
+    
+    def fmt(x): return f"{x:,}"
+    def pct(x): return f"{x:.1f}%"
+    
+    rows.append(["순매출액", fmt(data['G_total']), "100.0%", ""])
+    rows.append(["총비용 (지출)", fmt(data['total_expense']), pct(data['total_expense']/base*100), ""])
+    
+    for key, label in EXPENSE_ITEMS.items():
+        val = get_safe_value(st.session_state.expenses[key])
+        note = st.session_state.expense_notes.get(key, "")
+        if val > 0 or note:
+            rows.append([f"  └ {label}", fmt(val), pct(val/base*100), note])
+            
+    rows.append(["순이익 (차감전)", fmt(data['net_profit']), pct(data['net_profit']/base*100), "입금액 - 비용"])
+    rows.append(["위탁수수료 (20%)", fmt(data['commission']), pct(data['commission']/base*100), "순이익의 20%"])
+    
+    # 최종 결과용 별도 행
+    final_row = ["최종 배당금", fmt(data['final_payout']), pct(data['final_payout']/base*100), "최종 지급액"]
 
-        # 2. 상세 내역 테이블
-        st.subheader("2. 정산 세부 내역 (Detail)")
-        
-        base = data['G_total'] if data['G_total'] > 0 else 1
-        rows = []
-        
-        # 포맷팅 헬퍼
-        def fmt_money(x): return f"{x:,}"
-        def fmt_pct(x): return f"{x:.1f}%"
-        
-        rows.append(["순매출액", fmt_money(data['G_total']), "100.0%", ""])
-        rows.append(["총비용 (지출)", fmt_money(data['total_expense']), fmt_pct(data['total_expense']/base*100), ""])
-        
-        for key, label in EXPENSE_ITEMS.items():
-            val = get_safe_value(st.session_state.expenses[key])
-            note = st.session_state.expense_notes.get(key, "")
-            if val > 0 or note:
-                rows.append([f"  └ {label}", fmt_money(val), fmt_pct(val/base*100), note])
-                
-        rows.append(["순이익 (차감전)", fmt_money(data['net_profit']), fmt_pct(data['net_profit']/base*100), "입금액 - 비용"])
-        rows.append(["위탁수수료 (20%)", fmt_money(data['commission']), fmt_pct(data['commission']/base*100), "순이익의 20%"])
-        
-        # 결과 데이터프레임
-        df_res = pd.DataFrame(rows, columns=["구분", "금액", "비율", "비고"])
-        
-        # 테이블 표시
-        st.dataframe(
-            df_res,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "구분": st.column_config.TextColumn("구분", width="medium"),
-                "금액": st.column_config.TextColumn("금액", width="small"), # 문자열이므로 TextColumn
-                "비율": st.column_config.TextColumn("비율", width="small"),
-                "비고": st.column_config.TextColumn("비고", width="large"),
-            }
-        )
+    # 데이터프레임 생성
+    df_detail = pd.DataFrame(rows, columns=["구분", "금액", "비율", "비고"])
+    
+    # [중요] 스크롤바 없는 전체 테이블 표시를 위해 st.table 사용
+    st.table(df_detail)
 
-        st.divider()
-        
-        # 최종 배당금 강조 박스
-        st.info(f"""
-        ### 💰 최종 배당금: {data['final_payout']:,} 원
-        """)
+    # 최종 배당금 강조 (블루 박스)
+    st.info(f"### 💰 최종 배당금: {data['final_payout']:,} 원")
 
-        st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True) # End of a4-preview
 
     # ------------------------------------------------------------------
-    # 하단 다운로드 버튼 (컨테이너 밖)
+    # 하단 다운로드 버튼
     # ------------------------------------------------------------------
-    c_down1, c_down2 = st.columns(2)
+    c1, c2 = st.columns(2)
     
-    with c_down1:
-        # JSON 백업
+    with c1:
+        # JSON 백업 (보조)
         save_data = {
             "ota": st.session_state.ota_df.to_dict('records'),
             "exp": st.session_state.expenses,
@@ -438,12 +448,12 @@ def render_report_page():
             "comocasa_data.json"
         )
         
-    with c_down2:
+    with c2:
         # PDF 다운로드
         try:
             pdf_bytes = create_pdf(data, st.session_state.expenses, st.session_state.expense_notes)
             st.download_button(
-                "📄 PDF 정산서 다운로드 (A4)", 
+                "📄 정산서 PDF 다운로드", 
                 pdf_bytes, 
                 "comocasa_report.pdf", 
                 type="primary",
