@@ -10,12 +10,23 @@ from datetime import datetime
 # --------------------------------------------------------------------------
 st.set_page_config(page_title="COMO CASA 정산 시스템", layout="wide", page_icon="🏢")
 
-# CSS는 최소화하여 문법 오류 가능성을 줄임
 st.markdown("""
     <style>
+    /* 폰트 및 기본 설정 */
+    body { font-family: 'Malgun Gothic', sans-serif; }
+    
+    /* 타이틀 스타일 */
     .main-title { font-size: 32px; font-weight: 800; color: #1E3A8A; border-bottom: 3px solid #1E3A8A; padding-bottom: 10px; margin-bottom: 20px; }
     .sub-title { font-size: 20px; font-weight: 700; color: #1E3A8A; margin-top: 20px; margin-bottom: 10px; border-bottom: 1px solid #ddd; }
+    
+    /* 입력창 텍스트 우측 정렬 (숫자처럼 보이게) */
     div[data-testid="stTextInput"] input { text-align: right; }
+    
+    /* 합계 테이블 스타일 */
+    .total-container { background-color: #f0f2f6; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-weight: bold; }
+    
+    /* 버튼 스타일 */
+    div.stButton > button[kind="primary"] { background-color: #1E3A8A; border-color: #1E3A8A; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -23,10 +34,12 @@ st.markdown("""
 # 2. 데이터 구조 및 유틸리티 함수
 # --------------------------------------------------------------------------
 OTA_LIST = ["아고다", "부킹닷컴", "에어비앤비", "트립닷컴", "야놀자게하", "야놀자펜션", "여기어때", "추가정보(자가운영등)"]
+
 COLS = {
     "OTA": "OTA", "D": "체크인건수(D)", "E": "숙박일수(E)",
     "F": "총매출액(F)", "G": "입금액(G)", "H": "플랫폼수수료(H)"
 }
+
 EXPENSE_ITEMS = {
     "building_maint": "건물관리비", "comm_cost": "통신비", "cleaning": "청소비",
     "laundry": "세탁비", "repair": "시설보수비", "linen": "린넨감가",
@@ -34,11 +47,15 @@ EXPENSE_ITEMS = {
 }
 
 def str_to_int(val):
-    """콤마가 포함된 문자열 또는 None을 정수로 변환"""
-    if val is None or val == "": return 0
+    """콤마가 포함된 문자열 또는 None을 정수로 변환 (계산용)"""
+    if val is None: return 0
+    # 이미 숫자인 경우
     if isinstance(val, (int, float)): return int(val)
+    # 문자열인 경우
     try:
-        return int(str(val).replace(',', '').strip())
+        clean_str = str(val).replace(',', '').strip()
+        if clean_str == "": return 0
+        return int(clean_str)
     except:
         return 0
 
@@ -53,13 +70,17 @@ def int_to_str(val):
 # 3. 상태 초기화 및 계산 로직
 # --------------------------------------------------------------------------
 def init_session_state():
+    # OTA 데이터: 항상 숫자형(int)으로 관리되는 원본 데이터
     if 'ota_df' not in st.session_state:
         data = {c: [0]*len(OTA_LIST) if c != "OTA" else OTA_LIST for c in COLS.values()}
         st.session_state.ota_df = pd.DataFrame(data)
 
     if 'expenses' not in st.session_state:
         st.session_state.expenses = {key: 0 for key in EXPENSE_ITEMS.keys()}
-        st.session_state.expenses.update({'operating_days': 31, 'avail_rooms': 1, 'room_op_days': 30, 'share_rate': 100, 'divisor_days': 35})
+        st.session_state.expenses.update({
+            'operating_days': 31, 'avail_rooms': 1, 'room_op_days': 30,
+            'share_rate': 100, 'divisor_days': 35
+        })
 
     if 'expense_notes' not in st.session_state:
         st.session_state.expense_notes = {key: "" for key in EXPENSE_ITEMS.keys()}
@@ -74,28 +95,10 @@ def init_session_state():
     if 'current_page' not in st.session_state:
         st.session_state.current_page = 'input'
 
-# --- H열 자동 계산 콜백 (가장 중요) ---
-def handle_ota_change():
-    # data_editor에서 변경된 모든 값이 포함된 DataFrame을 가져옴
-    updated_df_str = st.session_state.ota_editor_v2 
-    
-    # 1. 문자열을 숫자로 변환하여 임시 DataFrame 생성
-    temp_numeric_df = updated_df_str.copy()
-    for col in [COLS["D"], COLS["E"], COLS["F"], COLS["G"]]:
-        temp_numeric_df[col] = temp_numeric_df[col].apply(str_to_int)
-        
-    # 2. H열 계산 (숫자 상태에서)
-    temp_numeric_df[COLS["H"]] = temp_numeric_df[COLS["F"]] - temp_numeric_df[COLS["G"]]
-    
-    # 3. 세션 상태 업데이트 (숫자형)
-    st.session_state.ota_df = temp_numeric_df
-    
-    # 4. Rerun 트리거 (화면 갱신)
-    st.rerun()
-
 def calculate_metrics(df, expenses):
-    # (이전과 동일한 숫자 계산 로직)
+    # 모든 계산은 숫자형 데이터(int/float)로 수행
     calc_df = df.copy()
+    # H열 재계산 (안전장치)
     calc_df[COLS["H"]] = calc_df[COLS["F"]] - calc_df[COLS["G"]]
     sums = calc_df.sum(numeric_only=True)
     
@@ -128,7 +131,7 @@ def calculate_metrics(df, expenses):
     return metrics
 
 # --------------------------------------------------------------------------
-# 4. PDF 생성 함수 (변경 없음 - 인코딩 해결 완료)
+# 4. PDF 생성 함수
 # --------------------------------------------------------------------------
 class PDFReport(FPDF):
     def footer(self):
@@ -146,35 +149,40 @@ class PDFReport(FPDF):
 def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     pdf = PDFReport()
     pdf.add_page()
+    
+    # 폰트 로드 확인
     font_path = "NanumGothic.ttf"
     if os.path.exists(font_path):
         pdf.add_font("NanumGothic", "", font_path, uni=True)
         pdf.add_font("NanumGothic", "B", font_path, uni=True)
         font_family = "NanumGothic"
     else:
-        font_family = "Arial"
-        
+        # 폰트가 없을 경우 기본 폰트 사용 (한글 깨짐 주의)
+        font_family = "Arial" 
+
+    # 타이틀
     pdf.set_font(font_family, "B", 22)
     pdf.cell(0, 15, f"꼬모까사 숙박 운영 정산서 : {meta['year']%100}년 {meta['month']}월", ln=True, align='C')
     pdf.set_line_width(0.5)
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
     
+    # 기본 정보
     pdf.set_font(font_family, "", 10)
     pdf.cell(0, 5, f"발행일: {meta['issue_date']}", ln=True)
     pdf.cell(0, 5, f"호실명/소유주: [{meta['room_name']}] / [{meta['owner_name']}]", ln=True)
     pdf.ln(8)
     
     def draw_row(c1, c2, c3, c4, fill=False, bold=False):
-        pdf.set_font("NanumGothic", "B" if bold else "", 10)
+        pdf.set_font(font_family, "B" if bold else "", 10)
         if fill: pdf.set_fill_color(240, 240, 240)
-        pdf.cell(50, 8, c1, 1, 0, 'C' if fill else 'L', fill)
-        pdf.cell(50, 8, c2, 1, 0, 'C' if fill else 'R', fill)
-        pdf.cell(30, 8, c3, 1, 0, 'C', fill)
-        pdf.cell(60, 8, c4, 1, 1, 'C' if fill else 'L', fill)
+        pdf.cell(50, 8, str(c1), 1, 0, 'C' if fill else 'L', fill)
+        pdf.cell(50, 8, str(c2), 1, 0, 'C' if fill else 'R', fill)
+        pdf.cell(30, 8, str(c3), 1, 0, 'C', fill)
+        pdf.cell(60, 8, str(c4), 1, 1, 'C' if fill else 'L', fill)
 
     def detail_row(l, v, r, n, bold=False):
-        pdf.set_font("NanumGothic", "B" if bold else "", 10)
+        pdf.set_font(font_family, "B" if bold else "", 10)
         pdf.cell(50, 8, l, 1, 0, 'L')
         pdf.cell(50, 8, v, 1, 0, 'R')
         pdf.cell(30, 8, r, 1, 0, 'R')
@@ -183,8 +191,8 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     def fmt(x): return f"{x:,.0f}" if isinstance(x, (int, float)) else x
     def pct(x): return f"{x:.1f}%"
     
-    # --- Section 1 ---
-    pdf.set_font("NanumGothic", "B", 12)
+    # 1. 판매 현황
+    pdf.set_font(font_family, "B", 12)
     pdf.cell(0, 10, "1. 판매 현황 (Sales Status)", ln=True)
     draw_row("구분", "금액/수치", "단위", "비고", True, True)
     draw_row("판매총액 (VAT포함)", fmt(metrics['F_total']), "원", "")
@@ -197,11 +205,11 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     draw_row("OCC (가동률)", f"{metrics['occ']:.1f}", "%", "")
     pdf.ln(5)
 
-    # --- Section 2 ---
-    pdf.set_font("NanumGothic", "B", 12)
+    # 2. 정산 세부
+    pdf.set_font(font_family, "B", 12)
     pdf.cell(0, 10, "2. 정산 세부 내역", ln=True)
     pdf.set_fill_color(240, 240, 240)
-    pdf.set_font("NanumGothic", "B", 10)
+    pdf.set_font(font_family, "B", 10)
     pdf.cell(50, 8, "구분", 1, 0, 'C', True)
     pdf.cell(50, 8, "금액", 1, 0, 'C', True)
     pdf.cell(30, 8, "매출 대비", 1, 0, 'C', True)
@@ -223,8 +231,8 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
     detail_row("배당 대상 순이익", fmt(metrics['distributable']), pct(metrics['distributable']/base*100), "", True)
     pdf.ln(5)
 
-    # --- Section 3 ---
-    pdf.set_font("NanumGothic", "B", 12)
+    # 3. 소유주 정산
+    pdf.set_font(font_family, "B", 12)
     pdf.cell(0, 10, "3. 소유주 정산", ln=True)
     draw_row("구분", "내용", "단위", "", True, True)
     draw_row("배당 대상 순이익", fmt(metrics['distributable']), "원", "")
@@ -244,7 +252,7 @@ def create_pdf(metrics, expenses, notes, meta, stamp_file=None):
 
 
 # --------------------------------------------------------------------------
-# 4. 메인 UI 렌더링 함수
+# 5. 메인 UI 및 로직
 # --------------------------------------------------------------------------
 def main():
     init_session_state()
@@ -256,25 +264,33 @@ def main():
 def render_input_page():
     st.markdown('<div class="main-title">COMO CASA 정산 시스템 (Admin)</div>', unsafe_allow_html=True)
     
-    with st.expander("📝 기본 정보 (발행일, 소유주)", expanded=True):
+    # 1. 메타 정보
+    with st.expander("📝 기본 정보 설정", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
         st.session_state.meta_info['year'] = c1.number_input("년도", value=st.session_state.meta_info['year'])
         st.session_state.meta_info['month'] = c2.number_input("월", value=st.session_state.meta_info['month'])
         st.session_state.meta_info['room_name'] = c3.text_input("호실명", value=st.session_state.meta_info['room_name'])
         st.session_state.meta_info['owner_name'] = c4.text_input("소유주", value=st.session_state.meta_info['owner_name'])
-        
         c5, c6 = st.columns(2)
         st.session_state.meta_info['issue_date'] = c5.text_input("발행일", value=st.session_state.meta_info['issue_date'])
         st.session_state['stamp_file'] = c6.file_uploader("직인 이미지", type=['png'])
 
-    st.markdown('<div class="sub-title">1. OTA 매출 입력 (콤마 자동 적용 & H열 자동 계산)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">1. OTA 매출 입력 (콤마 자동 적용 & 실시간 계산)</div>', unsafe_allow_html=True)
     
-    # **핵심 수정: on_change 콜백을 사용하여 F/G 변경 시 H 계산 및 Rerun**
-    current_df = st.session_state.ota_df.copy()
-    current_df[COLS["H"]] = current_df[COLS["F"]] - current_df[COLS["G"]]
-    sums = current_df.sum(numeric_only=True)
+    # -------------------------------------------------------------------
+    # [핵심 로직] OTA 테이블 처리 (숫자 -> 문자열 변환 표시 -> 변경 감지 -> 계산 -> 리런)
+    # -------------------------------------------------------------------
     
-    # 합계 표시용 DF (콤마 찍힌 문자열)
+    # 1. 현재 세션의 숫자 데이터 가져오기
+    current_numeric_df = st.session_state.ota_df.copy()
+    
+    # 2. H열(수수료) 선행 계산 (숫자 기반)
+    current_numeric_df[COLS["H"]] = current_numeric_df[COLS["F"]] - current_numeric_df[COLS["G"]]
+    
+    # 3. 합계 계산
+    sums = current_numeric_df.sum(numeric_only=True)
+    
+    # 4. 합계 테이블 표시 (콤마 포맷팅)
     total_data = pd.DataFrame([{
         COLS["OTA"]: "합 계",
         COLS["D"]: int_to_str(sums[COLS['D']]),
@@ -283,23 +299,22 @@ def render_input_page():
         COLS["G"]: int_to_str(sums[COLS['G']]),
         COLS["H"]: int_to_str(sums[COLS['H']])
     }])
-    
-    st.markdown('<div class="total-table-container">▼ 전체 합계 (자동 계산)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="total-container">▼ 전체 합계 (자동 계산)</div>', unsafe_allow_html=True)
     st.dataframe(total_data, use_container_width=True, hide_index=True)
 
-    # 에디터 표시용 DF (콤마 찍힌 문자열로 변환)
+    # 5. 에디터용 데이터프레임 생성 (모든 숫자를 콤마가 포함된 문자열로 변환)
     display_df = current_df.copy()
     for col in [COLS["D"], COLS["E"], COLS["F"], COLS["G"], COLS["H"]]:
         display_df[col] = display_df[col].apply(int_to_str)
 
-    # 데이터 에디터 (TextColumn 사용 + on_change로 H 자동 계산 유도)
+    # 6. 데이터 에디터 렌더링 (TextColumn 사용)
+    #    on_change 등의 콜백을 제거하고, 아래의 비교 로직으로 업데이트를 처리합니다.
     edited_df_str = st.data_editor(
         display_df,
-        key="ota_editor_v3", 
+        key="ota_editor_stable", 
         use_container_width=True,
         hide_index=True,
         num_rows="fixed",
-        on_change=handle_ota_change, # **F, G 변경 시 H 자동 계산 및 Rerun 유도**
         column_config={
             COLS["OTA"]: st.column_config.TextColumn("플랫폼", disabled=True),
             COLS["D"]: st.column_config.TextColumn("체크인", width="small"),
@@ -310,17 +325,39 @@ def render_input_page():
         }
     )
     
+    # 7. 변경 감지 및 업데이트 로직
+    #    화면에 표시된 데이터(display_df)와 사용자가 편집한 데이터(edited_df_str)가 다르면
+    #    변경된 내용을 파싱하여 세션 상태를 업데이트하고 리런합니다.
+    if not display_df.equals(edited_df_str):
+        new_data = {}
+        for col in current_numeric_df.columns:
+            if col == COLS["OTA"]:
+                new_data[col] = edited_df_str[col]
+            else:
+                # 문자열("1,000") -> 숫자(1000)로 변환
+                new_data[col] = edited_df_str[col].apply(str_to_int)
+        
+        # 업데이트된 숫자 데이터로 세션 갱신
+        st.session_state.ota_df = pd.DataFrame(new_data)
+        st.rerun()
+
+    # -------------------------------------------------------------------
+    # 비용 입력
+    # -------------------------------------------------------------------
     st.markdown('<div class="sub-title">2. 비용 및 운영 정보 (콤마 자동 적용)</div>', unsafe_allow_html=True)
     
-    # 비용 입력 (세로 배치 & 콤마 처리)
     for key, label in EXPENSE_ITEMS.items():
         c1, c2 = st.columns([1, 2])
         
+        # 현재 값(숫자)을 가져와 콤마 문자열로 변환
         curr_val = st.session_state.expenses[key]
         disp_val = int_to_str(curr_val) if curr_val != 0 else ""
         
+        # 텍스트 입력창 (콤마 보여주기용)
         new_val_str = c1.text_input(f"{label} (금액)", value=disp_val, key=f"in_{key}", placeholder="0")
-        st.session_state.expenses[key] = str_to_int(new_val_str) # 입력 즉시 숫자로 저장
+        
+        # 입력된 값을 즉시 숫자로 변환하여 저장 (엔터 치면 저장됨)
+        st.session_state.expenses[key] = str_to_int(new_val_str)
         
         note = c2.text_input(f"{label} 비고", value=st.session_state.expense_notes.get(key, ""), key=f"nt_{key}")
         st.session_state.expense_notes[key] = note
@@ -328,10 +365,10 @@ def render_input_page():
     st.markdown("#### ⚙️ 추가 운영 지표")
     col_a, col_b, col_c = st.columns(3)
     
+    # 콤마 입력 필드 헬퍼
     def input_comma_field(label, key, col):
         val = st.session_state.expenses.get(key, 0)
         disp = int_to_str(val) if val != 0 else ""
-        # 텍스트 입력 사용
         new_s = col.text_input(label, value=disp, key=f"k_{key}")
         st.session_state.expenses[key] = str_to_int(new_s)
 
@@ -349,7 +386,6 @@ def render_input_page():
         st.rerun()
 
 def render_report_page():
-    # 리포트 페이지는 Streamlit 네이티브 위젯만 사용
     if st.button("⬅ 수정 화면", type="secondary"):
         st.session_state.current_page = 'input'
         st.rerun()
@@ -357,7 +393,8 @@ def render_report_page():
     metrics = calculate_metrics(st.session_state.ota_df, st.session_state.expenses)
     meta = st.session_state.meta_info
     
-    st.markdown('<div class="main-title">꼬모까사 숙박 운영 정산서 : 26년 2월</div>', unsafe_allow_html=True)
+    # HTML 제거하고 Streamlit 네이티브 위젯 사용
+    st.markdown(f'<div class="main-title">꼬모까사 숙박 운영 정산서 : {meta["year"]%100}년 {meta["month"]}월</div>', unsafe_allow_html=True)
     
     st.markdown(f"""
         <div style="font-size: 14px; margin-bottom: 20px;">
@@ -414,7 +451,6 @@ def render_report_page():
     st.success(f"### 💰 최종 배당금: {metrics['final_payout']:,} 원")
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # 4. 다운로드 버튼
     st.markdown('<div class="sub-title">3. 리포트 다운로드</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     
@@ -431,7 +467,7 @@ def render_report_page():
             stamp_img = st.session_state.get('stamp_file')
             pdf_bytes = create_pdf(metrics, st.session_state.expenses, st.session_state.expense_notes, meta, stamp_img)
             if pdf_bytes:
-                st.download_button("📄 정산서 PDF 다운로드", pdf_bytes, "comocasa_report.pdf", "application/pdf", type="primary")
+                st.download_button("📄 PDF 정산서 다운로드", pdf_bytes, "comocasa_report.pdf", "application/pdf", type="primary")
         except Exception as e:
             st.error(f"PDF 생성 오류: {e}")
 
